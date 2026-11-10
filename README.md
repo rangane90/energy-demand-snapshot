@@ -40,6 +40,10 @@ GitHub Actions runs on pushes to `main` and pull requests targeting `main`. The 
 
 ## Jenkins pipeline
 
+The [verified Jenkins run](https://github.com/rangane90/energy-demand-snapshot/actions/runs/42780648885) ran all three HTTP tests, built the commit-tagged Docker image, and smoke-tested the container. The run includes the Jenkins console output and a downloadable log retained for 30 days.
+
+To repeat the check, run [Jenkins verification](https://github.com/rangane90/energy-demand-snapshot/actions/workflows/jenkins.yml) from the Actions tab. It starts Jenkins on a temporary Linux runner.
+
 Use a Pipeline job configured from a Git repository with this Jenkinsfile. The agent needs the `docker` label, Git, Python 3.12, and access to a Linux Docker engine.
 
 1. Run HTTP tests for the health endpoint, summary, and unknown routes.
