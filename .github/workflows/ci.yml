@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Run HTTP tests
+        run: python -B -m unittest -v
+
+      - name: Build container image
+        run: |
+          docker build \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "energy-demand-snapshot:$GITHUB_SHA" .
+
+      - name: Smoke-test the image
+        run: |
+          container=$(docker run --detach --publish 127.0.0.1::8080 "energy-demand-snapshot:$GITHUB_SHA")
+          cleanup() {
+            docker logs "$container" || true
+            docker rm --force "$container" >/dev/null || true
+          }
+          trap cleanup EXIT
+
+          address=$(docker port "$container" 8080/tcp)
+          curl --fail --silent --show-error --retry 5 --retry-connrefused --max-time 3 "http://$address/health"
+          curl --fail --silent --show-error --max-time 3 "http://$address/summary" |
+            python -c 'import json, sys; data = json.load(sys.stdin); assert data == {"data_source": "synthetic", "samples": 8, "average_mw": 490, "peak_mw": 720}, data; print(data)'
