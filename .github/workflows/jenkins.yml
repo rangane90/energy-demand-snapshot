@@ -1,0 +1,93 @@
+name: Jenkins verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'Jenkinsfile'
+      - '.github/jenkins/**'
+      - '.github/workflows/jenkins.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  run-jenkins:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Jenkins and Pipeline plugins
+        shell: bash
+        run: |
+          jenkins_image=jenkins/jenkins:lts-jdk21
+          jenkins_home="$RUNNER_TEMP/jenkins"
+          mkdir -p "$jenkins_home/plugins" "$jenkins_home/init.groovy.d"
+          cp .github/jenkins/verify.groovy "$jenkins_home/init.groovy.d/"
+
+          docker pull "$jenkins_image"
+          docker run --rm --entrypoint cat "$jenkins_image" \
+            /usr/share/jenkins/jenkins.war > "$RUNNER_TEMP/jenkins.war"
+          docker run --rm --user "$(id -u):$(id -g)" --env HOME=/tmp \
+            --volume "$jenkins_home/plugins:/plugins" \
+            --entrypoint jenkins-plugin-cli "$jenkins_image" \
+            --war /usr/share/jenkins/jenkins.war \
+            --plugin-download-directory /plugins --plugins workflow-aggregator git
+
+      - name: Run the repository Jenkinsfile
+        shell: bash
+        env:
+          JENKINS_HOME: ${{ runner.temp }}/jenkins
+        run: |
+          console="$RUNNER_TEMP/jenkins-console.log"
+          controller="$RUNNER_TEMP/jenkins-controller.log"
+          build_url=http://127.0.0.1:18080/job/energy-demand-snapshot/lastBuild
+          touch "$console"
+
+          "$JAVA_HOME_21_X64/bin/java" -Djenkins.install.runSetupWizard=false \
+            -jar "$RUNNER_TEMP/jenkins.war" --httpListenAddress=127.0.0.1 \
+            --httpPort=18080 > "$controller" 2>&1 &
+          jenkins_pid=$!
+          trap 'kill "$jenkins_pid" 2>/dev/null || true' EXIT
+
+          result=
+          for attempt in {1..120}; do
+            if ! kill -0 "$jenkins_pid" 2>/dev/null; then
+              break
+            fi
+            if build=$(curl --fail --silent --max-time 5 "$build_url/api/json?tree=result"); then
+              result=$(jq -r '.result // empty' <<< "$build")
+              if [[ -n "$result" ]]; then
+                break
+              fi
+            fi
+            sleep 5
+          done
+
+          curl --fail --silent --max-time 15 "$build_url/consoleText" | tee "$console" || true
+          if [[ "$result" != SUCCESS ]]; then
+            tail -n 80 "$controller"
+            echo "Jenkins result: ${result:-no completed build}"
+            exit 1
+          fi
+
+          revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+            "energy-demand-snapshot:$GITHUB_SHA")
+          test "$revision" = "$GITHUB_SHA"
+
+      - name: Save Jenkins console log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jenkins-console
+          path: ${{ runner.temp }}/jenkins-console.log
+          if-no-files-found: ignore
+          retention-days: 30
