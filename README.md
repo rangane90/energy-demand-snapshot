@@ -1,5 +1,7 @@
 # Energy Demand Snapshot
 
+[![CI](https://github.com/rangane90/energy-demand-snapshot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rangane90/energy-demand-snapshot/actions/workflows/ci.yml)
+
 A small Python API that summarizes synthetic hourly electricity demand. I built it to connect my interest in energy forecasting with the software delivery practices that make an engineering tool repeatable to build and test.
 
 The API returns the sample count, average demand, and peak demand in megawatts. The fixture contains eight fictional readings and is included with the app.
